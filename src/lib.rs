@@ -34,10 +34,7 @@
 //! ```
 
 use syn_helpers::{
-    derive_trait,
-    proc_macro2::Span,
-    syn::{parse_macro_input, parse_quote, DeriveInput, Ident, Stmt},
-    Constructable as _, FieldMut as _, Trait, TraitItem, TypeOfSelf,
+    derive_trait, proc_macro2::Span, syn::{parse_macro_input, parse_quote, DeriveInput, Ident, Stmt}, Constructable as _, Field, FieldMut as _, ToTokens, Trait, TraitItem, TypeOfSelf
 };
 
 #[proc_macro_derive(ToTokens, attributes(to_tokens))]
@@ -50,7 +47,7 @@ fn to_tokens() -> Trait {
     Trait {
         name: parse_quote!(::quote::ToTokens),
         generic_parameters: None,
-        items: vec![TraitItem::Method {
+        items: [TraitItem::Method {
             name: Ident::new("to_tokens", Span::call_site()),
             generic_parameters: None,
             self_type: TypeOfSelf::Reference,
@@ -62,13 +59,32 @@ fn to_tokens() -> Trait {
                         .get_fields_mut()
                         .fields_iterator_mut()
                         .flat_map(|mut field| -> Option<Stmt> {
-                            let field = field.get_reference();
-                            Some(parse_quote!(::quote::ToTokens::to_tokens(#field, tokens);))
+                            match field.get_type() {
+                                syn_helpers::syn::Type::Path(p) => {
+                                    if p.to_token_stream().to_string().starts_with("Vec <") {
+                                        let field = field.get_reference();
+                                        Some(
+                                            parse_quote!{
+                                                for elem in #field.iter() {
+                                                    ::quote::ToTokens::to_tokens(elem, tokens);
+                                                }
+                                            }
+                                        )
+                                    } else {
+                                        let field = field.get_reference();
+                                        Some(parse_quote!(::quote::ToTokens::to_tokens(#field, tokens);))
+                                    }
+                                },
+                                _ => {
+                                    let field = field.get_reference();
+                                    Some(parse_quote!(::quote::ToTokens::to_tokens(#field, tokens);))
+                                },
+                            }
                         })
                         .collect())
                 })
             }),
-        }],
+        }].into_iter().collect(),
     }
 }
 
